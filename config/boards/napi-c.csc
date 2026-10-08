@@ -6,6 +6,8 @@ BOARD_VENDOR="napilab"
 BOARDFAMILY="napi"
 BOARD_MAINTAINER=""
 
+enable_extension "napi-minimal"
+
 BOOTCONFIG="napi-c-rk3308_defconfig"
 BOOT_FDT_FILE="rockchip/rk3308-napi-c.dtb"
 
@@ -45,4 +47,3 @@ function post_family_config__napi_c_family_tweaks() {
 			"${destination}/etc/udev/rules.d"
 	}
 }
-
