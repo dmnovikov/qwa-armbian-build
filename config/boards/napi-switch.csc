@@ -35,6 +35,24 @@ PACKAGE_LIST_BOARD="vim net-tools can-utils mbpoll minicom tcpdump screen memtes
 	python3-smbus2 git tmux make cmake gcc build-essential flex bison libssl-dev pkg-config \
 	ethtool bridge-utils"
 
+# MRP ring redundancy (IEC 62439-2) runs in software on the KSZ9567 (patch
+# net-dsa-microchip-ksz9477-software-MRP); the bridge is built in, so MRP
+# cannot come as a module.
+# Never hang: a switch must work or reboot. Lockup and hung-task detectors
+# panic, a panic reboots in 10 s (a task stuck in the kernel otherwise leaves
+# PID 1 feeding the hardware watchdog while the switch is dead).
+function custom_kernel_config__napi_switch_mrp_and_lockups() {
+	opts_y+=(
+		"BRIDGE_MRP"
+		"DEBUG_KERNEL"
+		"SOFTLOCKUP_DETECTOR" "BOOTPARAM_SOFTLOCKUP_PANIC"
+		"HARDLOCKUP_DETECTOR" "HARDLOCKUP_DETECTOR_PREFER_BUDDY" "BOOTPARAM_HARDLOCKUP_PANIC"
+		"DETECT_HUNG_TASK" "BOOTPARAM_HUNG_TASK_PANIC"
+	)
+	opts_val["DEFAULT_HUNG_TASK_TIMEOUT"]="120"
+	opts_val["PANIC_TIMEOUT"]="10"
+}
+
 function post_family_config__napi_switch_family_tweaks() {
 	function family_tweaks_bsp() {
 		return 0
