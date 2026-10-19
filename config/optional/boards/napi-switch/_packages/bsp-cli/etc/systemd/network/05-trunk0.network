@@ -1,0 +1,9 @@
+# NAPI-Switch: never let networkd touch the DSA conduit.  Restarting it
+# (down/up, MTU, reconfigure) toggles the RMII reference clock the SoC feeds
+# to KSZ9567, and the switch<->CPU path hangs until reboot.
+# The kernel brings trunk0 up by itself when the first lanX port opens.
+[Match]
+Name=trunk0
+
+[Link]
+Unmanaged=yes
