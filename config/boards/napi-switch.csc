@@ -108,3 +108,29 @@ function post_repo_customize_image__napi_switch_mstpd() {
 	return 0
 }
 
+# napi-switchd (REST API, web UI on :8080, health watchdog) and napi-mrp
+# (MRP ring daemon) from repo.napilab.ru; sources: github.com/lab240/napiswitch.
+# napi-switchd drives kernel STP on br0 and swaps it for MRP, so mstpd stays
+# installed but is kept off br0: bridge-stp then leaves STP to the kernel.
+# napi-switchd disables napi-rstp.service on install.
+function post_repo_customize_image__napi_switch_napi_switchd() {
+	if [[ ! -f "${SDCARD}/usr/share/keyrings/napilab.gpg" ]]; then
+		display_alert "${BOARD}" "napilab repo missing, napi-switchd not installed" "wrn"
+		return 0
+	fi
+	display_alert "${BOARD}" "installing napi-switchd napi-mrp" "info"
+	chroot_sdcard_apt_get_install napi-switchd napi-mrp
+
+	declare conf="${SDCARD}/etc/bridge-stp.conf"
+	if [[ -f "${conf}" ]]; then
+		display_alert "${BOARD}" "mstpd: no bridges (kernel STP for napi-switchd)" "info"
+		cat >> "${conf}" <<- 'EOF'
+
+			# napi-switch: napi-switchd manages STP/MRP on br0 with kernel STP.
+			# No bridge is handed to mstpd ('-' matches no bridge name).
+			MSTP_BRIDGES='-'
+		EOF
+	fi
+	return 0
+}
+
