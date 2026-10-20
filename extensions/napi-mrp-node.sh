@@ -18,13 +18,19 @@ function custom_kernel_config__napi_mrp_node() {
 function post_family_tweaks__napi_mrp_node_accounts() {
 	declare user_name="napi" user_pass="napilinux" group
 
-	display_alert "${BOARD}" "napi-mrp-node: user '${user_name}', no first-login wizard" "info"
-	chroot_sdcard "id '${user_name}' >/dev/null 2>&1 || useradd --create-home --shell /bin/bash --comment 'NAPI' '${user_name}'"
-	chroot_sdcard "echo '${user_name}:${user_pass}' | chpasswd"
-	for group in sudo netdev dialout plugdev systemd-journal; do
-		chroot_sdcard "usermod -aG '${group}' '${user_name}' 2>/dev/null || true"
-	done
-	run_host_command_logged rm -fv "${SDCARD}/root/.not_logged_in_yet"
+	# NapiLab boards (family napi) create the user themselves, and their useradd
+	# fails on an existing one: leave the accounts to the family there.
+	if declare -F post_family_tweaks__napilab_provision_accounts > /dev/null; then
+		display_alert "${BOARD}" "napi-mrp-node: accounts from the napi family" "info"
+	else
+		display_alert "${BOARD}" "napi-mrp-node: user '${user_name}', no first-login wizard" "info"
+		chroot_sdcard "id '${user_name}' >/dev/null 2>&1 || useradd --create-home --shell /bin/bash --comment 'NAPI' '${user_name}'"
+		chroot_sdcard "echo '${user_name}:${user_pass}' | chpasswd"
+		for group in sudo netdev dialout plugdev systemd-journal; do
+			chroot_sdcard "usermod -aG '${group}' '${user_name}' 2>/dev/null || true"
+		done
+		run_host_command_logged rm -fv "${SDCARD}/root/.not_logged_in_yet"
+	fi
 
 	if [[ -n "${NAPI_ROOT_SSH_KEY}" ]]; then
 		declare key="${NAPI_ROOT_SSH_KEY}"
