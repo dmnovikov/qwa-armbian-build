@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dmitry Novikov <dj.novikov@gmail.com>
+Date: Tue, 20 Oct 2026 21:30:00 +0300
+Subject: net: bridge: mrp: run the ring in software on plain NICs
+
+With CONFIG_NET_SWITCHDEV=y the bridge asks the switchdev drivers for
+the MRP instance and the ring role and refuses the ring when nobody
+answers: "mrp addmrp" fails with -EOPNOTSUPP on a bridge of ordinary
+NICs, although such a bridge forwards every frame in software and the
+software MRP needs nothing from the hardware.  Without NET_SWITCHDEV
+the same bridge runs MRP in software.
+
+Accept -EOPNOTSUPP for the MRP instance, and for the ring role when no
+ring port is offloaded by a switchdev driver (offload_count 0).  An
+offloaded port still has to accept the role with sw_backup, which
+promises that MRP frames reach the CPU.
+
+Tested on NanoPi R6S (RTL8125, RK3588S) as MRC in a ring with
+NAPI-Switch (MRM): ring break and closure, 128-145 ms recovery.
+---
+--- a/net/bridge/br_mrp.c
++++ b/net/bridge/br_mrp.c
+@@ -535,8 +535,11 @@
+ 	INIT_DELAYED_WORK(&mrp->in_test_work, br_mrp_in_test_work_expired);
+ 	hlist_add_tail_rcu(&mrp->list, &br->mrp_list);
+ 
++	/* No switchdev driver takes the MRP instance: -EOPNOTSUPP. The
++	 * instance then runs in software, as the ring role and test do.
++	 */
+ 	err = br_mrp_switchdev_add(br, mrp);
+-	if (err)
++	if (err && err != -EOPNOTSUPP)
+ 		goto delete_mrp;
+ 
+ 	return 0;
+--- a/net/bridge/br_mrp_switchdev.c
++++ b/net/bridge/br_mrp_switchdev.c
+@@ -61,6 +61,21 @@
+ 	return switchdev_port_obj_del(br->dev, &mrp_obj.obj);
+ }
+ 
++/* No ring port is offloaded by a switchdev driver: the bridge forwards
++ * every frame in software, nothing has to trap MRP frames to the CPU.
++ */
++static bool br_mrp_ring_in_software(struct br_mrp *mrp)
++{
++#ifdef CONFIG_NET_SWITCHDEV
++	struct net_bridge_port *p = rtnl_dereference(mrp->p_port);
++	struct net_bridge_port *s = rtnl_dereference(mrp->s_port);
++
++	return !(p && p->offload_count) && !(s && s->offload_count);
++#else
++	return true;
++#endif
++}
++
+ enum br_mrp_hw_support
+ br_mrp_switchdev_set_ring_role(struct net_bridge *br, struct br_mrp *mrp,
+ 			       enum br_mrp_ring_role_type role)
+@@ -95,6 +110,10 @@
+ 	if (!err)
+ 		return BR_MRP_SW;
+ 
++	/* Plain NICs: no driver answers, run the ring in software. */
++	if (err == -EOPNOTSUPP && br_mrp_ring_in_software(mrp))
++		return BR_MRP_SW;
++
+ 	return BR_MRP_NONE;
+ }
+ 
