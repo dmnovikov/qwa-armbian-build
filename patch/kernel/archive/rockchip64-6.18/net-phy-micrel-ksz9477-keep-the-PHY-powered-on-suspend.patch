@@ -1,0 +1,74 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dmitry Novikov <dj.novikov@gmail.com>
+Date: Wed, 21 Oct 2026 16:30:00 +0500
+Subject: net: phy: micrel: ksz9477: keep the PHY powered on suspend
+
+"ip link set lanX down" halts the PHY, and phylib suspends it:
+genphy_suspend() sets BMCR_PDOWN. On "ip link set lanX up"
+ksz9477_resume() clears it, and as its own comment says, leaving
+power-down generates an internal global reset. On KSZ9567 that reset
+can take down the link of other ports of the switch.
+
+Seen on NAPI-Switch (KSZ9567) in an MRP ring with 1000BASE-T links on
+lan2, lan3, lan5 and lan1 at 100 Mbit: in 2 of 3 cases bringing one
+port up dropped the links of other ports for about 3 s. Once both ring
+ports went down together, so the ring was cut for 2.8 s although only
+one link had been toggled. A cable pulled or plugged at the far end
+never did this: the PHY is not powered down then.
+
+Do not power the PHY down on suspend. Take the link down instead:
+advertise nothing and restart autonegotiation, the link partner loses
+the link as with a pulled cable. phy_start() puts the advertisement
+back through config_aneg. ksz9477_resume() finds BMCR_PDOWN clear and
+does nothing, so no global reset. Unused ports, which ksz9477.c powers
+down at setup, are not affected.
+
+The cost is the power of an idle PHY on an administratively down port.
+---
+ drivers/net/phy/micrel.c | 27 ++++++++++++++++++++++++++-
+ 1 file changed, 26 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/phy/micrel.c b/drivers/net/phy/micrel.c
+--- a/drivers/net/phy/micrel.c
++++ b/drivers/net/phy/micrel.c
+@@ -2487,6 +2487,31 @@
+ 	return 0;
+ }
+ 
++/* Powering a KSZ9477 PHY up again generates an internal global reset (see
++ * ksz9477_resume()), and that reset can drop the link of the other PHYs of
++ * the switch: on a ring both ring ports go down when one port is brought up
++ * with "ip link set up". So a suspend leaves the PHY powered and only takes
++ * the link down: advertise nothing and restart autonegotiation, the link
++ * partner sees the link go away as with a pulled cable. phy_start() writes
++ * the advertisement back through config_aneg.
++ */
++static int ksz9477_suspend(struct phy_device *phydev)
++{
++	int ret;
++
++	ret = phy_modify(phydev, MII_ADVERTISE,
++			 ADVERTISE_ALL | ADVERTISE_PAUSE_CAP | ADVERTISE_PAUSE_ASYM, 0);
++	if (ret < 0)
++		return ret;
++
++	ret = phy_modify(phydev, MII_CTRL1000,
++			 ADVERTISE_1000FULL | ADVERTISE_1000HALF, 0);
++	if (ret < 0)
++		return ret;
++
++	return genphy_restart_aneg(phydev);
++}
++
+ static int ksz8061_resume(struct phy_device *phydev)
+ {
+ 	int ret;
+@@ -6629,7 +6654,7 @@
+ 	.config_aneg	= ksz9477_config_aneg,
+ 	.read_status	= ksz9477_read_status,
+ 	.handle_interrupt = kszphy_handle_interrupt,
+-	.suspend	= genphy_suspend,
++	.suspend	= ksz9477_suspend,
+ 	.resume		= ksz9477_resume,
+ 	.get_phy_stats	= kszphy_get_phy_stats,
+ 	.update_stats	= kszphy_update_stats,
